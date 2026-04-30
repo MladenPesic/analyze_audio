@@ -1,0 +1,24 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Project data — don't commit downloads or large outputs
+data/raw/
+data/stems/
+data/results/*.csv
+data/results/*.png
+
+# But DO keep MIDI references (they're small and necessary)
+!data/reference/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+
+# OS
+Thumbs.db
+.DS_Store
