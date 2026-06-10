@@ -12,7 +12,19 @@ does NOT model between-broadcast variance (out of scope by the one-clip rule);
 it is the honest uncertainty available, and overlapping intervals are reported
 as "cannot be distinguished".
 
-Usage:  python aggregate_rank.py "path/to/*_windows.csv"
+METHODOLOGY GUARD
+-----------------
+The final ranking may contain ONLY clips registered in anthems.py with
+dataset == "tournament". Any *_windows.csv whose nation is registered as
+"calibration" is skipped automatically (and listed). A nation not found in the
+registry at all is skipped too -- every ranked clip must be declared.
+Including calibration clips would not just add rows: scores are normalised
+across the table, so intruders shift every other nation's score.
+
+Usage:
+    python aggregate_rank.py "data/results/*_windows.csv"
+    python aggregate_rank.py "data/results/*_windows.csv" --include-calibration
+        (method testing only -- never for the published ranking)
 """
 import glob, sys, argparse, os
 import numpy as np, pandas as pd
@@ -37,20 +49,52 @@ def bootstrap_medians(win_df, rng):
     return point, boot
 
 
+def load_registry():
+    """country -> dataset ("tournament"/"calibration") from anthems.py."""
+    try:
+        from anthems import ANTHEMS
+    except ImportError:
+        return None
+    return {cfg["country"]: cfg.get("dataset", "calibration")
+            for cfg in ANTHEMS.values()}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("glob_pattern")
+    ap.add_argument("--include-calibration", action="store_true",
+                    help="rank calibration clips too (method testing ONLY)")
     args = ap.parse_args()
     files = sorted(glob.glob(args.glob_pattern))
     if not files:
         sys.exit(f"No files match {args.glob_pattern}")
 
+    registry = load_registry()
+    if registry is None and not args.include_calibration:
+        sys.exit("anthems.py not found -- run from the repo root so the "
+                 "registry can enforce the tournament-only rule.")
+
     rng = np.random.default_rng(0)
-    nations = {}
+    nations, skipped = {}, []
     for f in files:
         df = pd.read_csv(f)
         name = df["nation"].iloc[0] if "nation" in df else os.path.basename(f).split("_windows")[0]
+        if not args.include_calibration:
+            status = registry.get(name)
+            if status != "tournament":
+                why = "calibration clip" if status == "calibration" else "not in anthems.py registry"
+                skipped.append((name, why))
+                continue
         nations[name] = bootstrap_medians(df, rng)
+
+    if skipped:
+        print("\nExcluded from ranking (methodology guard):")
+        for name, why in skipped:
+            print(f"  {name:<16} {why}")
+    if not nations:
+        sys.exit("\nNo eligible tournament clips to rank. Register clips in "
+                 "anthems.py with dataset=\"tournament\" (or use "
+                 "--include-calibration for method testing).")
 
     # cross-nation min-max normalisation per component (from the point estimates)
     pts = {c: np.array([nations[n][0][c] for n in nations]) for c in COMPONENTS}
