@@ -5,8 +5,7 @@ import pandas as pd
 from pathlib import Path
 
 def analyze_pitch(vocals_path: Path, sr: int = 22050,
-                  fmin_hz: float = 80.0, fmax_hz: float = 600.0,
-                  voiced_threshold: float = 0.6):
+                  fmin_hz: float = 80.0, fmax_hz: float = 600.0):
     """Extract F0 and compute cent deviations from nearest equal-tempered semitone."""
     y, sr = librosa.load(str(vocals_path), sr=sr, mono=True)
 

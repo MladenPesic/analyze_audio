@@ -7,7 +7,7 @@ ANTHEMS = {
         "anthem_name": "Hen Wlad Fy Nhadau",
         "youtube_url": "https://www.youtube.com/watch?v=ZwdZOHm8r-Y",
         "video_id": "ZwdZOHm8r-Y",
-        "trim_start": "00:00:10",   # adjust to your actual trim points
+        "trim_start": "00:00:10",
         "trim_end": "00:01:20",
         "midi_path": "data/reference/hen_wlad_fy_nhadau.mid",
         "melody_track": 1,
@@ -26,4 +26,15 @@ ANTHEMS = {
         "venue": "Euro 2016",
         "context": "Euro 2016",
     },
-}
+    "canada": {
+    "country": "Canada",
+    "anthem_name": "O Canada",
+    "youtube_url": "https://www.youtube.com/watch?v=Rqd3y_QThNo",
+    "video_id": "Rqd3y_QThNo",
+    "trim_start": "00:00:16",
+    "trim_end":   "00:01:19",
+    "midi_path": "data/reference/canada.mid",
+    "melody_track": 1,
+    "venue": "Qatar (WC 2022)",
+    "context": "FIFA World Cup 2022"
+}}
