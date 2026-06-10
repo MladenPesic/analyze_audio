@@ -6,7 +6,13 @@ from pathlib import Path
 
 def analyze_pitch(vocals_path: Path, sr: int = 22050,
                   fmin_hz: float = 80.0, fmax_hz: float = 600.0):
-    """Extract F0 and compute cent deviations from nearest equal-tempered semitone."""
+    """Extract F0 per frame and cent deviations from the nearest A440 semitone.
+
+    Note: the cent deviations here are measured against the absolute A440
+    equal-tempered grid. They are DESCRIPTIVE diagnostics only -- crowds sing
+    at their own tuning, so grid-based numbers must not be used to compare
+    nations. The ranking metrics (tuning-invariant) live in score_rendition.py.
+    """
     y, sr = librosa.load(str(vocals_path), sr=sr, mono=True)
 
     f0, voiced_flag, voiced_prob = librosa.pyin(
@@ -35,6 +41,12 @@ def analyze_pitch(vocals_path: Path, sr: int = 22050,
     }
 
 def summarize(result: dict) -> dict:
+    """Descriptive stats of the pitch track.
+
+    pct_grid_within_* measure proximity to the absolute A440 semitone grid
+    ("is the pitch near SOME standard note"), NOT singing quality and NOT the
+    ranking metric. Named with a grid_ prefix to avoid confusion with the
+    tuning-invariant intonation measures in score_rendition.py."""
     cents = result["cents"]
     cents = cents[~np.isnan(cents)]
     if len(cents) == 0:
@@ -49,8 +61,8 @@ def summarize(result: dict) -> dict:
         "median_cents_offset": round(float(np.median(cents)), 2),
         "abs_mean_cents": round(float(np.mean(np.abs(cents))), 2),
         "std_cents": round(float(np.std(cents)), 2),
-        "pct_within_25_cents": round(float(np.mean(np.abs(cents) < 25) * 100), 1),
-        "pct_within_50_cents": round(float(np.mean(np.abs(cents) < 50) * 100), 1),
+        "pct_grid_within_25c": round(float(np.mean(np.abs(cents) < 25) * 100), 1),
+        "pct_grid_within_50c": round(float(np.mean(np.abs(cents) < 50) * 100), 1),
     }
 
 if __name__ == "__main__":

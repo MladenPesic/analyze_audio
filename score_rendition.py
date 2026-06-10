@@ -175,6 +175,33 @@ def windowed_components(times, midi):
     return df
 
 
+def soloist_warning(win_df, r_high=0.75, clip_median_max=0.50, min_run=3):
+    """QC: flag possible soloist/PA-dominated segments.
+
+    Signature: a run of consecutive windows with very concentrated pitch
+    (intonation_R > r_high) inside a clip whose overall median R is much lower.
+    A lone miked voice tracks far cleaner than a massed crowd, so such a run
+    usually means the broadcast cut to a soloist or the PA. With one clip per
+    nation this cannot be corrected afterwards -- review flagged clips manually.
+    Returns a list of (t_start, t_end) segments, empty if clean.
+    """
+    if win_df["intonation_R"].median() >= clip_median_max:
+        return []
+    hot = (win_df["intonation_R"] > r_high).to_numpy()
+    t = win_df["t"].to_numpy()
+    segs, run_start = [], None
+    for i, h in enumerate(hot):
+        if h and run_start is None:
+            run_start = i
+        elif not h and run_start is not None:
+            if i - run_start >= min_run:
+                segs.append((float(t[run_start]), float(t[i - 1])))
+            run_start = None
+    if run_start is not None and len(hot) - run_start >= min_run:
+        segs.append((float(t[run_start]), float(t[-1])))
+    return segs
+
+
 def aggregate(win_df):
     """Robust (median) summary across windows -> one value per component."""
     return {c: float(np.nanmedian(win_df[c])) for c in
@@ -228,26 +255,25 @@ def plot(win_df, label, out_png):
     plt.tight_layout(); plt.savefig(out_png, dpi=130); plt.close()
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("input", help="audio file (wav) or pitch CSV")
-    ap.add_argument("--label", default=None)
-    args = ap.parse_args()
-    label = args.label or args.input.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+def score_clip(input_path, label, outdir="data/results"):
+    """Score one clip. Returns (aggregates, chance, composite, paths).
+    Callable from run_anthem.py; the CLI below is a thin wrapper."""
+    import os
+    os.makedirs(outdir, exist_ok=True)
 
-    times, midi = load_pitch(args.input)
+    times, midi = load_pitch(input_path)
     win_df = windowed_components(times, midi)
     if win_df.empty:
-        print("No scorable windows (too little confident singing). Check the clip / separation.")
-        sys.exit(1)
+        raise RuntimeError(
+            "No scorable windows (too little confident singing). "
+            "Check the clip / separation.")
 
     agg = aggregate(win_df)
     chance = chance_baseline(times, midi)
     score, norm = composite(agg)
-    out_png = f"{label}_rendition.png"
+    out_png = os.path.join(outdir, f"{label}_rendition.png")
+    out_csv = os.path.join(outdir, f"{label}_windows.csv")
     plot(win_df, label, out_png)
-    # persist per-window components so aggregate_rank.py can bootstrap & rank
-    out_csv = f"{label}_windows.csv"
     win_df.assign(nation=label).to_csv(out_csv, index=False)
 
     print(f"\n=== Rendition score: {label} ===")
@@ -258,11 +284,31 @@ def main():
                     ("stability", ""), ("participation", "")]:  # participation baseline = value by construction
         print(f"  {c:<14}{agg[c]:>9.2f}{unit:<1}{chance[c]:>14.2f}")
     print(f"\n  COMPOSITE (provisional): {score:.3f}")
-    print(f"  saved plot: {out_png}  and per-window data: {out_csv}\n")
-    print("  Read the plot: flat-high intonation with a spike usually = a soloist")
-    print("  segment; broad crowd singing is steadier but a bit lower. If one short")
-    print("  stretch dominates, the median already discounts it -- but prefer clips")
-    print("  where the crowd, not a single voice, carries most of the clip.")
+    print(f"  saved plot: {out_png}  and per-window data: {out_csv}")
+
+    segs = soloist_warning(win_df)
+    if segs:
+        pretty = ", ".join(f"{a:.0f}-{b:.0f}s" for a, b in segs)
+        print(f"\n  [QC WARNING] possible soloist/PA-dominated segment(s): {pretty}")
+        print("  A lone miked voice scores far cleaner than a crowd. Review this")
+        print("  clip manually before including it in the ranking.")
+
+    return agg, chance, score, dict(png=out_png, windows_csv=out_csv)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("input", help="audio file (wav) or pitch CSV")
+    ap.add_argument("--label", default=None)
+    ap.add_argument("--outdir", default="data/results",
+                    help="directory for the PNG and windows CSV (default: data/results)")
+    args = ap.parse_args()
+    label = args.label or args.input.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    try:
+        score_clip(args.input, label, args.outdir)
+    except RuntimeError as e:
+        print(str(e))
+        sys.exit(1)
 
 
 if __name__ == "__main__":
