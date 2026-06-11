@@ -58,7 +58,7 @@ WINDOW_S = 3.0            # analysis window length
 HOP_S = 1.5              # window hop (50% overlap)
 MIN_VOICED_PER_WINDOW = 8 # skip windows with too little singing to judge
 ACTIVITY_FULL = 2.5       # entropy (bits) treated as "fully varied" when normalising
-WEIGHTS = dict(intonation=0.35, activity=0.25, stability=0.20, participation=0.20)
+WEIGHTS = dict(intonation=0.40, activity=0.10, stability=0.20, participation=0.30)
 
 
 # ----------------------------------------------------------------------
@@ -123,13 +123,33 @@ def intonation_R(midi_v):
     return float(np.abs(np.mean(np.exp(1j * 2 * np.pi * _cents_to_grid(midi_v) / 100.0))))
 
 
+# Activity is a melodic-movement GATE, not a "more is better" reward.
+# Pitch entropy (bits) of the sung notes: ~0 = monotone drone, ~1-2 = real
+# singing, ~3.5-4.5 = random noise (scatter). So both extremes are bad: a
+# drone has no melody, and very high entropy means noise, not richness.
+ACTIVITY_FLOOR = 0.40   # below this: likely a drone / nothing sung
+ACTIVITY_CEIL  = 3.00   # above this: scatter/noise, not melodic singing
+
 def activity(midi_v):
-    """Entropy (bits) of the sung-note distribution. 0 = one note (drone)."""
+    """Raw pitch entropy in bits (the measured quantity). 0 = single note."""
     if len(midi_v) < 2:
         return np.nan
     _, counts = np.unique(np.round(midi_v), return_counts=True)
     p = counts / counts.sum()
     return float(-(p * np.log2(p)).sum())
+
+
+def activity_ok(bits):
+    """Drone/noise gate: 1.0 inside the healthy melodic band, ramping to 0 at
+    the drone floor and the noise ceiling. Flat across the middle so a clean
+    clip is NOT penalised for having less entropy than a noisier one."""
+    if np.isnan(bits):
+        return np.nan
+    if bits <= ACTIVITY_FLOOR:
+        return max(0.0, bits / ACTIVITY_FLOOR)
+    if bits >= ACTIVITY_CEIL:
+        return max(0.0, 1.0 - (bits - ACTIVITY_CEIL) / ACTIVITY_CEIL)
+    return 1.0
 
 def stability(midi_v):
     """Fraction of consecutive voiced frames that hold pitch (|delta| < 0.3 semitone).
@@ -167,6 +187,7 @@ def windowed_components(times, midi):
             intonation=intonation(midi_v, tw),
             intonation_R=intonation_R(midi_v),
             activity=activity(midi_v),
+            activity_ok=activity_ok(activity(midi_v)),
             stability=stability(midi_v),
             participation=participation(voiced_mask),
         ))
@@ -205,7 +226,7 @@ def soloist_warning(win_df, r_high=0.75, clip_median_max=0.50, min_run=3):
 def aggregate(win_df):
     """Robust (median) summary across windows -> one value per component."""
     return {c: float(np.nanmedian(win_df[c])) for c in
-            ["intonation", "intonation_R", "activity", "stability", "participation"]}
+            ["intonation", "intonation_R", "activity", "activity_ok", "stability", "participation"]}
 
 
 # ----------------------------------------------------------------------
@@ -215,10 +236,10 @@ def chance_baseline(times, midi, n_trials=8, seed=0):
     rng = np.random.default_rng(seed)
     voiced = midi[~np.isnan(midi)]
     if len(voiced) < 10:
-        return {c: np.nan for c in ["intonation","intonation_R","activity","stability","participation"]}
+        return {c: np.nan for c in ["intonation","intonation_R","activity","activity_ok","stability","participation"]}
     lo, hi = np.nanpercentile(voiced, 2), np.nanpercentile(voiced, 98)
     voiced_pattern = ~np.isnan(midi)
-    cols = ["intonation", "intonation_R", "activity", "stability", "participation"]
+    cols = ["intonation", "intonation_R", "activity", "activity_ok", "stability", "participation"]
     out = {c: [] for c in cols}
     for _ in range(n_trials):
         fake = np.full(len(midi), np.nan)
@@ -235,7 +256,7 @@ def chance_baseline(times, midi, n_trials=8, seed=0):
 def composite(agg):
     norm = dict(
         intonation=agg["intonation"] / 100.0,
-        activity=min(agg["activity"] / ACTIVITY_FULL, 1.0),
+        activity=agg["activity_ok"],   # drone/noise gate, not linear reward
         stability=agg["stability"],
         participation=agg["participation"],
     )
@@ -281,7 +302,7 @@ def score_clip(input_path, label, outdir="data/results"):
           f"clip tuning offset {win_df.attrs.get('tuning_offset_cents', 0):+.0f} cents vs A440)\n")
     print(f"  {'component':<14}{'value':>10}{'noise baseline':>16}")
     for c, unit in [("intonation", "%"), ("intonation_R", ""), ("activity", "bits"),
-                    ("stability", ""), ("participation", "")]:  # participation baseline = value by construction
+                    ("activity_ok", ""), ("stability", ""), ("participation", "")]:  # participation baseline = value by construction
         print(f"  {c:<14}{agg[c]:>9.2f}{unit:<1}{chance[c]:>14.2f}")
     print(f"\n  COMPOSITE (provisional): {score:.3f}")
     print(f"  saved plot: {out_png}  and per-window data: {out_csv}")

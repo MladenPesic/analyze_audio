@@ -23,7 +23,19 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from urllib.parse import urlparse, parse_qs
+
 from anthems import ANTHEMS
+
+
+def _video_id(url: str) -> str:
+    u = urlparse(url)
+    if u.hostname == "youtu.be":
+        return u.path.lstrip("/")
+    qs = parse_qs(u.query)
+    if "v" in qs:
+        return qs["v"][0]
+    raise ValueError(f"Cannot parse a YouTube video id from: {url}")
 from download import download_audio
 from separate import separate_vocals
 from analyze import analyze_pitch, summarize
@@ -35,21 +47,20 @@ def run_pipeline(key: str, force: bool = False):
         print(f"Unknown anthem: {key}. Available: {list(ANTHEMS.keys())}")
         sys.exit(1)
     cfg = ANTHEMS[key]
-    vid = cfg["video_id"]
+    vid = _video_id(cfg["url"])
     raw_wav = Path(f"data/raw/{vid}.wav")
     vocals_wav = Path(f"data/stems/htdemucs_ft/{vid}/vocals.wav")
     pitch_csv = Path(f"data/results/{vid}_pitch.csv")
 
     print(f"\n{'=' * 60}")
-    print(f"  {cfg['country']}  --  {cfg['anthem_name']}")
-    print(f"  {cfg.get('context', '')}   [dataset: {cfg['dataset']}]")
+    print(f"  {cfg['country']}   [dataset: {cfg['dataset']}]")
     print(f"{'=' * 60}\n")
 
     # [1/4] Download
     if force or not raw_wav.exists():
         print("[1/4] Downloading...")
-        download_audio(cfg["youtube_url"], "data/raw",
-                       start=cfg["trim_start"], end=cfg["trim_end"])
+        download_audio(cfg["url"], "data/raw",
+                       start=cfg["start"], end=cfg["end"])
     else:
         print(f"[1/4] Using cached {raw_wav}")
 
